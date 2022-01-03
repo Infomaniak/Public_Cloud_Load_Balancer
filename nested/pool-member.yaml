@@ -1,0 +1,35 @@
+---
+heat_template_version: rocky
+parameters:
+  index:
+    type: string
+
+  indice:
+    type: number
+
+  pool_members_addresses:
+    type: comma_delimited_list
+
+  pool_members_pools:
+    type: comma_delimited_list
+
+  pool_members_ports:
+    type: comma_delimited_list
+
+  pool_members_subnet:
+    type: string
+
+resources:
+  pool_member:
+    type: OS::Octavia::PoolMember
+    properties:
+      address: { get_param: [ pool_members_addresses, { get_param: index } ] }
+      admin_state_up: True
+      pool: { get_param: [ pool_members_pools, { get_param: index } ] }
+      protocol_port:
+        yaql:
+          expression: int($.data.ports[$.data.index])
+          data:
+            ports: { get_param: pool_members_ports }
+            index: { get_param: indice }
+      subnet: { get_param: pool_members_subnet }

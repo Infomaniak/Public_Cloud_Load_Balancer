@@ -1,0 +1,36 @@
+---
+heat_template_version: rocky
+parameters:
+  index:
+    type: string
+
+  indice:
+    type: number
+
+  load_balancer:
+    type: string
+
+  listeners_prefix_name:
+    type: string
+
+  listeners_protocols:
+    type: comma_delimited_list
+
+  listeners_ports:
+    type: comma_delimited_list
+
+resources:
+  listener:
+    type: OS::Octavia::Listener
+    properties:
+      admin_state_up: True
+      loadbalancer: { get_param: load_balancer }
+      name:
+        list_join: [ '-', [ { get_param: listeners_prefix_name }, { get_param: index } ] ]
+      protocol: { get_param: [ listeners_protocols, { get_param: index } ] }
+      protocol_port:
+        yaql:
+          expression: int($.data.ports[$.data.index])
+          data:
+            ports: { get_param: listeners_ports }
+            index: { get_param: indice }

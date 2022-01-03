@@ -1,0 +1,403 @@
+---
+heat_template_version: rocky
+description:
+  Load-balancer stack with three HTTP backends, SSH access, HTTP health monitors and TLS termination
+
+parameters:
+  public_network:
+    type: string
+
+  backend_count:
+    type: number
+
+  backends_key_name:
+    type: string
+
+  backends_prefix_name:
+    type: string
+
+  backends_image:
+    type: string
+
+  backends_flavor:
+    type: string
+
+  backends_ips:
+    type: comma_delimited_list
+
+  backend_security_groups:
+    type: comma_delimited_list
+
+  security_groups_remote_ip_cidr_ssh:
+    type: string
+
+  security_groups_remote_ip_cidr_http:
+    type: string
+
+  listener_count:
+    type: number
+
+  listeners_prefix_name:
+    type: string
+
+  listeners_protocols:
+    type: comma_delimited_list
+
+  listeners_ports:
+    type: comma_delimited_list
+  
+  listener_tls_enabled:
+    type: string
+    default: 'false'
+    constraints:
+      - allowed_values: ['false', 'true']
+
+  listener_tls_name:
+    type: string
+
+  listener_tls_protocol:
+    type: string
+
+  listener_tls_port:
+    type: number
+
+  pool_count:
+    type: number
+
+  pools_protocols:
+    type: comma_delimited_list
+
+  pools_prefix_name:
+    type: string
+
+  pools_session_persistence:
+    type: comma_delimited_list
+
+  pools_load_balancer_algorithms:
+    type: comma_delimited_list
+
+  pool_tls_name:
+    type: string
+
+  pool_tls_protocol:
+    type: string
+
+  pool_tls_load_balance_algorithm:
+    type: string
+  
+  pool_tls_session_persistence:
+    type: string
+
+  pool_member_count:
+    type: number
+  
+  pool_members_pools:
+    type: comma_delimited_list
+
+  pool_members_addresses:
+    type: comma_delimited_list
+
+  pool_members_ports:
+    type: comma_delimited_list
+
+  pool_member_tls_count:
+    type: number
+  
+  pool_members_tls_pools:
+    type: comma_delimited_list
+
+  pool_members_tls_addresses:
+    type: comma_delimited_list
+
+  pool_members_tls_ports:
+    type: comma_delimited_list
+
+  health_monitor_delay:
+    type: number
+
+  health_monitor_timeout:
+    type: number
+  
+  health_monitor_http_method:
+    type: string
+
+  health_monitor_max_retries:
+    type: number
+
+  health_monitor_expected_codes:
+    type: string
+
+  health_monitor_pool:
+    type: string
+  
+  health_monitor_url_path:
+    type: string
+
+  health_monitor_type:
+    type: string
+
+  secret_algorithm:
+    type: string
+
+  secret_bit_length:
+    type: number
+
+  secret_expiration:
+    type: string
+
+  secret_mode:
+    type: string
+
+  secret_name:
+    type: string
+
+  secret_payload:
+    type: string
+    hidden: true
+
+  secret_payload_content_encoding:
+    type: string
+
+  secret_payload_content_type:
+    type: string
+
+  secret_type:
+    type: string
+
+conditions: {
+  'tls': { equals: [ { get_param: listener_tls_enabled }, 'true'] }
+}
+
+resources:
+  network:
+    type: OS::Neutron::Net
+    properties:
+      admin_state_up: True
+      port_security_enabled: True
+
+  subnet:
+    type: OS::Neutron::Subnet
+    depends_on: network
+    properties:
+      allocation_pools: [ { "start": 10.8.1.10, "end": 10.8.1.90 } ]
+      cidr: "10.8.1.0/24"
+      dns_nameservers: [ "83.166.143.51", "83.166.143.52" ]
+      enable_dhcp: True
+      ip_version: 4
+      network_id: { get_resource: network }
+
+  router:
+    type: OS::Neutron::Router
+    properties:
+      admin_state_up: True
+      external_gateway_info:
+        network: ext-floating1
+      name: router
+
+  router_interface:
+    type: OS::Neutron::RouterInterface
+    depends_on:
+      - router
+      - subnet
+    properties:
+      router: { get_resource: router }
+      subnet: { get_resource: subnet }
+
+  security_group_ssh:
+    type: OS::Neutron::SecurityGroup
+    properties:
+      description: SSH
+      name: SSH
+      rules:
+        - direction: ingress
+          remote_ip_prefix: { get_param: security_groups_remote_ip_cidr_ssh }
+          port_range_min: 22
+          port_range_max: 22
+          ethertype: IPv4
+          protocol: tcp
+  
+  security_group_http:
+    type: OS::Neutron::SecurityGroup
+    properties:
+      description: HTTP & HTTPS
+      name: HTTP
+      rules:
+        - direction: ingress
+          remote_ip_prefix: { get_param: security_groups_remote_ip_cidr_http }
+          port_range_min: 80
+          port_range_max: 80
+          ethertype: IPv4
+          protocol: tcp
+        - direction: ingress
+          remote_ip_prefix: { get_param: security_groups_remote_ip_cidr_http }
+          port_range_min: 443
+          port_range_max: 443
+          ethertype: IPv4
+          protocol: tcp
+
+  servers:
+    type: OS::Heat::ResourceGroup
+    depends_on:
+      - subnet
+      - security_group_ssh
+      - security_group_http
+    properties:
+      count: { get_param: backend_count }
+      resource_def:
+        type: nested/backend.yaml
+        properties:
+          index: "%index%"
+          backends_prefix_name: { get_param: backends_prefix_name }
+          backends_flavor: { get_param: backends_flavor }
+          backends_image: { get_param: backends_image }
+          backends_key_name: { get_param: backends_key_name }
+          backends_ips: { get_param: backends_ips }
+          backends_subnet: { get_resource: subnet }
+          backends_security_groups: { get_param: backend_security_groups }
+
+  load_balancer:
+    type: OS::Octavia::LoadBalancer
+    properties:
+      admin_state_up: True
+      name: load-balancer
+      provider: amphora
+      vip_subnet: { get_param: public_network }
+
+  listeners:
+    type: OS::Heat::ResourceGroup
+    depends_on: load_balancer
+    properties:
+      count: { get_param: listener_count }
+      resource_def:
+        type: nested/listener.yaml
+        properties:
+          index: "%index%"
+          indice: "%index%"
+          load_balancer: { get_resource: load_balancer }
+          listeners_prefix_name: { get_param: listeners_prefix_name }
+          listeners_protocols: { get_param: listeners_protocols }
+          listeners_ports: { get_param: listeners_ports }
+
+  listener_tls:
+    type: OS::Octavia::Listener
+    condition: 'tls'
+    depends_on:
+      - load_balancer
+      - secret
+    properties:
+      admin_state_up: True
+      loadbalancer: { get_resource: load_balancer }
+      name: { get_param: listener_tls_name }
+      protocol: { get_param: listener_tls_protocol }
+      protocol_port: { get_param: listener_tls_port }
+      default_tls_container_ref: { get_resource: secret }
+
+  pools:
+    type: OS::Heat::ResourceGroup
+    depends_on: listeners
+    properties:
+      count: { get_param: pool_count }
+      resource_def:
+        type: nested/pool.yaml
+        properties:
+          index: "%index%"
+          pools_load_balancer: { get_resource: load_balancer }
+          pools_load_balancer_algorithms: { get_param: pools_load_balancer_algorithms }
+          pools_listeners: { get_param: listeners_prefix_name }
+          pools_prefix_name: { get_param: pools_prefix_name }
+          pools_protocols: { get_param: pools_protocols }
+          pools_session_persistence: { get_param: pools_session_persistence }
+
+  pool_tls:
+    type: OS::Heat::ResourceGroup
+    condition: 'tls'
+    depends_on: listener_tls
+    properties:
+      count: 1
+      resource_def:
+        type: OS::Octavia::Pool
+        properties:
+          admin_state_up: True
+          lb_algorithm: { get_param: pool_tls_load_balance_algorithm }
+          listener: { get_param: listener_tls_name }
+          loadbalancer: { get_resource: load_balancer }
+          name: { get_param: pool_tls_name }
+          protocol: { get_param: pool_tls_protocol }
+          session_persistence:
+            type: { get_param: pool_tls_session_persistence }
+
+  pools_members:
+    type: OS::Heat::ResourceGroup
+    depends_on: pools
+    properties:
+      count: { get_param: pool_member_count }
+      resource_def:
+        type: nested/pool-member.yaml
+        properties:
+          index: "%index%"
+          indice: "%index%"
+          pool_members_addresses: { get_param: pool_members_addresses }
+          pool_members_pools: { get_param: pool_members_pools }
+          pool_members_ports: { get_param: pool_members_ports }
+          pool_members_subnet: { get_resource: subnet }
+
+  pool_members_tls:
+    type: OS::Heat::ResourceGroup
+    condition: 'tls'
+    depends_on: pool_tls
+    properties:
+      count: { get_param: pool_member_tls_count }
+      resource_def:
+        type: nested/pool-member.yaml
+        properties:
+          index: "%index%"
+          indice: "%index%"
+          pool_members_addresses: { get_param: pool_members_tls_addresses }
+          pool_members_pools: { get_param: pool_members_tls_pools }
+          pool_members_ports: { get_param: pool_members_tls_ports }
+          pool_members_subnet: { get_resource: subnet }
+  
+  health_monitor:
+    type: OS::Heat::ResourceGroup
+    depends_on: pools
+    properties:
+      count: 1
+      resource_def:
+        type: OS::Octavia::HealthMonitor
+        properties:
+          admin_state_up: True
+          delay: { get_param: health_monitor_delay }
+          expected_codes: { get_param: health_monitor_expected_codes }
+          http_method: { get_param: health_monitor_http_method }
+          max_retries: { get_param: health_monitor_max_retries }
+          pool: { get_param: health_monitor_pool }
+          timeout: { get_param: health_monitor_timeout }
+          type: { get_param: health_monitor_type }
+          url_path: { get_param: health_monitor_url_path }
+
+  secret:
+    type: OS::Barbican::Secret
+    condition: 'tls'
+    properties:
+      algorithm: { get_param: secret_algorithm }
+      bit_length: { get_param: secret_bit_length }
+      expiration: { get_param: secret_expiration }
+      mode: { get_param: secret_mode }
+      name: { get_param: secret_name }
+      payload: { get_param: secret_payload }
+      payload_content_encoding: { get_param: secret_payload_content_encoding }
+      payload_content_type: { get_param: secret_payload_content_type }
+      secret_type: { get_param: secret_type }
+
+outputs:
+  load-balancer-IP:
+    description: load-balancer IP address
+    value: { get_attr: [ load_balancer, vip_address ] }
+
+  website-URL:
+    description: website URL
+    value:
+      str_replace:
+        template: "http://IP/"
+        params:
+          IP: { get_attr: [ load_balancer, vip_address ] }

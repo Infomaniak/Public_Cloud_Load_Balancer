@@ -1,0 +1,46 @@
+---
+heat_template_version: rocky
+parameters:
+  index:
+    type: string
+
+  backends_key_name:
+    type: string
+
+  backends_prefix_name:
+    type: string
+
+  backends_image:
+    type: string
+
+  backends_flavor:
+    type: string
+
+  backends_ips:
+    type: comma_delimited_list
+
+  backends_subnet:
+    type: string
+
+  backends_security_groups:
+    type: comma_delimited_list
+
+resources:
+  backend:
+    type: OS::Nova::Server
+    properties:
+      flavor: { get_param: backends_flavor }
+      image: { get_param: backends_image }
+      key_name: { get_param: backends_key_name }
+      name:
+        list_join: [ '-', [ { get_param: backends_prefix_name }, { get_param: index } ] ]
+      networks:
+        - subnet: { get_param: backends_subnet }
+          port_extra_properties:
+            admin_state_up: True
+            port_security_enabled: True
+          fixed_ip: { get_param: [ backends_ips, { get_param: index } ] }
+      security_groups: { get_param: backends_security_groups }
+      user_data_format: RAW
+      user_data:
+        get_file: ../lib/cloudinit.conf

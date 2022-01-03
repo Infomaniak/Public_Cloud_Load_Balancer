@@ -1,0 +1,38 @@
+---
+heat_template_version: rocky
+parameters:
+  index:
+    type: string
+
+  pools_load_balancer:
+    type: string
+
+  pools_listeners:
+    type: string
+  
+  pools_load_balancer_algorithms:
+    type: comma_delimited_list
+
+  pools_prefix_name:
+    type: string
+
+  pools_protocols:
+    type: comma_delimited_list
+
+  pools_session_persistence:
+    type: comma_delimited_list
+
+resources:
+  pool:
+    type: OS::Octavia::Pool
+    properties:
+      admin_state_up: True
+      lb_algorithm: { get_param: [ pools_load_balancer_algorithms, { get_param: index } ] }
+      listener:
+        list_join: [ '-', [ { get_param: pools_listeners }, { get_param: index } ] ]
+      loadbalancer: { get_param: pools_load_balancer }
+      name:
+        list_join: [ '-', [ { get_param: pools_prefix_name }, { get_param: index } ] ]
+      protocol: { get_param: [ pools_protocols, { get_param: index } ] }
+      session_persistence:
+        type: { get_param: [ pools_session_persistence, { get_param: index } ] }
